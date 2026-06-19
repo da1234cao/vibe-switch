@@ -1,0 +1,35 @@
+# Binaries / compiled output
+/vibe-switch
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go workspace / vendor
+/vendor/
+go.work
+go.work.sum
+
+# Test & coverage artifacts
+*.coverprofile
+coverage.txt
+coverage.html
+profile.cov
+*.prof
+*.pcap
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+
+# Logs
+*.log
+
+# Claude Code local settings
+.claude/settings.local.json

@@ -1,0 +1,40 @@
+{
+    // 使用 IntelliSense 了解相关属性。
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // 调试光标所在文件里、你输入名字的那个测试
+            "name": "Debug 单个测试 (本包)",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}",
+            "args": [
+                "-test.run",
+                "${input:testName}",
+                "-test.v"
+            ],
+            "showLog": true
+        },
+        {
+            // 调试当前测试文件所在包的全部测试
+            "name": "Debug 整个测试包",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${fileDirname}",
+            "args": ["-test.v"],
+            "showLog": true
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testName",
+            "type": "promptString",
+            "description": "要调试的测试名（正则），例如 ^TestL2Connectivity$",
+            "default": "^TestL2Connectivity$"
+        }
+    ]
+}
