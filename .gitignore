@@ -27,9 +27,10 @@ profile.cov
 *.swo
 *~
 .idea/
+.vscode/
 
 # Logs
 *.log
 
 # Claude Code local settings
-.claude/settings.local.json
+.claude/
