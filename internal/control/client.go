@@ -9,9 +9,14 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"vibe-switch/internal/goswitch"
 )
+
+// rateInterval is the sampling window for `show rate`: two Stats snapshots are
+// taken this far apart and the per-second delta between them is reported.
+const rateInterval = time.Second
 
 // Show dials the server, runs one `show <what>` query, and prints it.
 func Show(sockPath, what string) error {
@@ -32,7 +37,7 @@ func Shell(sockPath string) error {
 	}
 	defer client.Close()
 
-	fmt.Fprintln(os.Stderr, "vibe-switch ctl — commands: show fdb|ports|stats|config|all, help, quit")
+	fmt.Fprintln(os.Stderr, "vibe-switch ctl — commands: show fdb|ports|stats|rate|config|all, help, quit")
 	sc := bufio.NewScanner(os.Stdin)
 	fmt.Fprint(os.Stderr, "vibe-switch> ")
 	for sc.Scan() {
@@ -42,7 +47,7 @@ func Shell(sockPath string) error {
 		case line == "quit" || line == "exit":
 			return nil
 		case line == "help":
-			fmt.Fprintln(os.Stderr, "show fdb|ports|stats|config|all | quit")
+			fmt.Fprintln(os.Stderr, "show fdb|ports|stats|rate|config|all | quit")
 		case strings.HasPrefix(line, "show "):
 			if err := query(client, strings.TrimSpace(line[len("show "):]), os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "error:", err)
@@ -77,6 +82,8 @@ func query(client *rpc.Client, what string, w io.Writer) error {
 			return err
 		}
 		renderStats(w, r)
+	case "rate":
+		return showRate(client, w, rateInterval)
 	case "config":
 		var r goswitch.EngineConfig
 		if err := client.Call(rpcName+".Config", Empty{}, &r); err != nil {
@@ -91,7 +98,7 @@ func query(client *rpc.Client, what string, w io.Writer) error {
 			}
 		}
 	default:
-		return fmt.Errorf("unknown target %q (fdb|ports|stats|config|all)", what)
+		return fmt.Errorf("unknown target %q (fdb|ports|stats|rate|config|all)", what)
 	}
 	return nil
 }
@@ -143,6 +150,71 @@ func renderStats(w io.Writer, stats []goswitch.PortStats) {
 			s.Name, s.RxFrames, s.RxBytes, s.TxFrames, s.TxBytes, s.Flooded, s.Dropped)
 	}
 	tw.Flush()
+}
+
+// showRate samples the cumulative Stats counters twice, interval apart, and
+// reports the per-second delta between the two snapshots — i.e. live throughput.
+// The window is measured by client wall-clock between the two RPCs, so the rate
+// is accurate even if either Call is briefly delayed.
+func showRate(client *rpc.Client, w io.Writer, interval time.Duration) error {
+	var first []goswitch.PortStats
+	if err := client.Call(rpcName+".Stats", Empty{}, &first); err != nil {
+		return err
+	}
+	start := time.Now()
+	time.Sleep(interval)
+	var second []goswitch.PortStats
+	if err := client.Call(rpcName+".Stats", Empty{}, &second); err != nil {
+		return err
+	}
+	renderRate(w, first, second, time.Since(start).Seconds())
+	return nil
+}
+
+func renderRate(w io.Writer, first, second []goswitch.PortStats, elapsed float64) {
+	if elapsed <= 0 {
+		elapsed = 1 // guard against divide-by-zero on a degenerate window
+	}
+	prev := make(map[string]goswitch.PortStats, len(first))
+	for _, s := range first {
+		prev[s.Name] = s
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "PORT\tRX_PPS\tRX_RATE\tTX_PPS\tTX_RATE\tDROP_PS")
+	for _, s := range second {
+		p := prev[s.Name] // zero value if the port is new this window
+		fmt.Fprintf(tw, "%s\t%.1f\t%s\t%.1f\t%s\t%.1f\n",
+			s.Name,
+			perSec(s.RxFrames, p.RxFrames, elapsed), humanRate(perSec(s.RxBytes, p.RxBytes, elapsed)),
+			perSec(s.TxFrames, p.TxFrames, elapsed), humanRate(perSec(s.TxBytes, p.TxBytes, elapsed)),
+			perSec(s.Dropped, p.Dropped, elapsed))
+	}
+	tw.Flush()
+}
+
+// perSec is the per-second rate of a monotonic counter over elapsed seconds.
+// A counter that appears to go backwards (port reset/replaced) clamps to 0.
+func perSec(now, prev uint64, elapsed float64) float64 {
+	if now < prev {
+		return 0
+	}
+	return float64(now-prev) / elapsed
+}
+
+// humanRate formats a byte/second throughput as a human-readable bit/second
+// string, the unit network operators expect for link speed.
+func humanRate(bytesPerSec float64) string {
+	bps := bytesPerSec * 8
+	switch {
+	case bps >= 1e9:
+		return fmt.Sprintf("%.2f Gbit/s", bps/1e9)
+	case bps >= 1e6:
+		return fmt.Sprintf("%.2f Mbit/s", bps/1e6)
+	case bps >= 1e3:
+		return fmt.Sprintf("%.2f Kbit/s", bps/1e3)
+	default:
+		return fmt.Sprintf("%.0f bit/s", bps)
+	}
 }
 
 func renderConfig(w io.Writer, c goswitch.EngineConfig) {

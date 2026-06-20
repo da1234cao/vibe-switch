@@ -181,7 +181,7 @@ func runCtl(args []string) error {
 		return control.Shell(*sock) // interactive
 	}
 	if rest[0] != "show" || len(rest) < 2 {
-		return fmt.Errorf("usage: vibe-switch ctl [show fdb|ports|stats|config|all]")
+		return fmt.Errorf("usage: vibe-switch ctl [show fdb|ports|stats|rate|config|all]")
 	}
 	return control.Show(*sock, rest[1])
 }
