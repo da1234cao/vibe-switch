@@ -1,4 +1,5 @@
 # Binaries / compiled output
+/bin/
 /vibe-switch
 *.exe
 *.exe~

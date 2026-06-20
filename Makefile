@@ -2,12 +2,16 @@
 # Network tests need root (netns / veth / AF_PACKET); run them under sudo.
 #
 # Common overrides:
-#   make test SWITCH=bridge            # select switch under test (default: bridge)
+#   make test SWITCH=bridge            # select switch under test (default: goswitch)
 #   make test ARGS="-run TestVLAN -v"  # pass extra flags through to `go test`
 #   make perf-gate PERF_MIN_PPS=50000  # perf run with a regression gate
 
 # --- knobs ----------------------------------------------------------------
-SWITCH ?= bridge
+# SWITCH selects which "switch under test" the behavioral suite drives:
+#   goswitch  our Go user-space switch (internal/goswitch)   [default]
+#   bridge    Linux kernel bridge
+# The test bodies never change — only this implementation behind them does.
+SWITCH ?= goswitch
 ARGS   ?=
 
 # Env exported to every `go test` invocation.
@@ -19,6 +23,14 @@ TESTENV := SWITCH=$(SWITCH)
 .PHONY: build
 build: ## Compile all packages (no binary output)
 	go build ./...
+
+.PHONY: build-bin
+build-bin: ## Build the standalone vibe-switch binary into ./bin
+	go build -o ./bin/vibe-switch ./cmd/vibe-switch
+
+.PHONY: demo
+demo: build-bin ## Run the binary on a throwaway veth topology (needs root)
+	./scripts/demo.sh
 
 .PHONY: vet
 vet: ## Run go vet

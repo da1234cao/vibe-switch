@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"vibe-switch/internal/goswitch"
 )
 
 // Port is what the harness hands the switch under test: a switch-side interface
@@ -40,9 +42,66 @@ func NewSwitchUnderTest() Switch {
 	switch s := os.Getenv("SWITCH"); s {
 	case "", "bridge":
 		return &BridgeSwitch{}
+	case "goswitch":
+		return &GoSwitch{}
 	default:
-		panic(fmt.Sprintf("unknown SWITCH=%q (known: bridge)", s))
+		panic(fmt.Sprintf("unknown SWITCH=%q (known: bridge, goswitch)", s))
 	}
+}
+
+// GoSwitch adapts the user-space goswitch.Engine to the harness Switch contract.
+// It opens an AF_PACKET handle inside the switch netns for each port (reusing the
+// shared goswitch rx options + inbound BPF) and hands them to the engine.
+type GoSwitch struct {
+	eng *goswitch.Engine
+}
+
+func (g *GoSwitch) Name() string { return "go-switch" }
+
+func (g *GoSwitch) Start(swNS string, ports []Port) error {
+	cfg := make([]goswitch.PortConfig, 0, len(ports))
+	ios := make([]goswitch.PacketIO, 0, len(ports))
+	cleanup := func() {
+		for _, io := range ios {
+			io.Close()
+		}
+	}
+	for _, p := range ports {
+		tp, err := openInNetns(swNS, goswitch.RxOpts(p.SwIf)...)
+		if err != nil {
+			cleanup()
+			return fmt.Errorf("goswitch: open %s: %w", p.SwIf, err)
+		}
+		if err := tp.SetBPF(goswitch.InboundBPF()); err != nil {
+			tp.Close()
+			cleanup()
+			return fmt.Errorf("goswitch: setbpf %s: %w", p.SwIf, err)
+		}
+		ios = append(ios, tp)
+		cfg = append(cfg, goswitch.PortConfig{Name: p.SwIf, AccessVID: p.AccessVID, Trunk: p.Trunk})
+	}
+	eng, err := goswitch.NewEngine(cfg, ios)
+	if err != nil {
+		cleanup()
+		return err
+	}
+	g.eng = eng
+	return g.eng.Start()
+}
+
+func (g *GoSwitch) Stop() error {
+	if g.eng == nil {
+		return nil
+	}
+	return g.eng.Stop()
+}
+
+// SetAgeing satisfies AgeingConfigurable so the ageing test case runs.
+func (g *GoSwitch) SetAgeing(d time.Duration) error {
+	if g.eng == nil {
+		return fmt.Errorf("goswitch: not started")
+	}
+	return g.eng.SetAgeing(d)
 }
 
 // BridgeSwitch is the reference switch: a Linux kernel bridge configured with
