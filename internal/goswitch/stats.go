@@ -9,12 +9,13 @@ import (
 // portStats are per-port counters bumped on the forwarding hot path. All fields
 // are accessed with sync/atomic, so reads (snapshots) never block forwarding.
 type portStats struct {
-	rxFrames uint64
-	rxBytes  uint64
-	txFrames uint64
-	txBytes  uint64
-	flooded  uint64
-	dropped  uint64
+	rxFrames    uint64
+	rxBytes     uint64
+	txFrames    uint64
+	txBytes     uint64
+	flooded     uint64
+	forwardDrop uint64 // ingress: unparseable frame or illegal VLAN tag for the role
+	txDrop      uint64 // egress: WritePacketData failed (e.g. frame > MTU → EMSGSIZE)
 }
 
 // --- read-only snapshots for the management interface ---
@@ -38,13 +39,14 @@ type PortInfo struct {
 }
 
 type PortStats struct {
-	Name     string
-	RxFrames uint64
-	RxBytes  uint64
-	TxFrames uint64
-	TxBytes  uint64
-	Flooded  uint64
-	Dropped  uint64
+	Name        string
+	RxFrames    uint64
+	RxBytes     uint64
+	TxFrames    uint64
+	TxBytes     uint64
+	Flooded     uint64
+	ForwardDrop uint64
+	TxDrop      uint64
 }
 
 type EngineConfig struct {
@@ -89,13 +91,14 @@ func (e *Engine) StatsSnapshot() []PortStats {
 	out := make([]PortStats, 0, len(e.ports))
 	for _, p := range e.ports {
 		out = append(out, PortStats{
-			Name:     p.name,
-			RxFrames: atomic.LoadUint64(&p.stats.rxFrames),
-			RxBytes:  atomic.LoadUint64(&p.stats.rxBytes),
-			TxFrames: atomic.LoadUint64(&p.stats.txFrames),
-			TxBytes:  atomic.LoadUint64(&p.stats.txBytes),
-			Flooded:  atomic.LoadUint64(&p.stats.flooded),
-			Dropped:  atomic.LoadUint64(&p.stats.dropped),
+			Name:        p.name,
+			RxFrames:    atomic.LoadUint64(&p.stats.rxFrames),
+			RxBytes:     atomic.LoadUint64(&p.stats.rxBytes),
+			TxFrames:    atomic.LoadUint64(&p.stats.txFrames),
+			TxBytes:     atomic.LoadUint64(&p.stats.txBytes),
+			Flooded:     atomic.LoadUint64(&p.stats.flooded),
+			ForwardDrop: atomic.LoadUint64(&p.stats.forwardDrop),
+			TxDrop:      atomic.LoadUint64(&p.stats.txDrop),
 		})
 	}
 	return out

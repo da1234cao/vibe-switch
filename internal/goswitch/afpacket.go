@@ -1,6 +1,10 @@
 package goswitch
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/gopacket/gopacket"
@@ -74,12 +78,40 @@ func (e *Engine) rxLoop(p *port) {
 	}
 }
 
+// disableOffloads turns off the receive/transmit coalescing offloads that are
+// incompatible with an AF_PACKET software bridge. GRO/LRO let the kernel merge
+// received segments into frames *larger than the MTU* before they reach our rx
+// tap; we cannot re-segment at L2, so forwarding such a frame fails at egress
+// with EMSGSIZE and the data is lost. GSO/TSO are the transmit-side duals.
+func disableOffloads(ifname string) error {
+	cmd := exec.Command("ethtool", "-K", ifname,
+		"gro", "off", "gso", "off", "tso", "off", "lro", "off")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("ethtool -K %s: %w (%s)", ifname, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // OpenInterface opens an AF_PACKET handle on ifname in the current network
 // namespace and installs the inbound filter. Used by the standalone binary; the
 // test harness opens its handles inside the switch netns instead.
 func OpenInterface(ifname string) (*afpacket.TPacket, error) {
+	// Switch ports must not coalesce on receive — see disableOffloads. Warn but
+	// continue on failure so the switch still comes up.
+	if err := disableOffloads(ifname); err != nil {
+		fmt.Fprintf(os.Stderr, "vibe-switch: warning: %v\n", err)
+		fmt.Fprintf(os.Stderr, "  >MTU frames will be dropped on egress; disable manually:\n")
+		fmt.Fprintf(os.Stderr, "  ethtool -K %s gro off gso off tso off lro off\n", ifname)
+	}
+
 	tp, err := afpacket.NewTPacket(RxOpts(ifname)...)
 	if err != nil {
+		return nil, err
+	}
+
+	// PACKET_MR_PROMISC is socket-scoped: the kernel drops it when tp closes.
+	if err := tp.SetPromiscuous(true); err != nil {
+		tp.Close()
 		return nil, err
 	}
 	if err := tp.SetBPF(InboundBPF()); err != nil {

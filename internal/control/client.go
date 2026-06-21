@@ -144,10 +144,10 @@ func renderPorts(w io.Writer, ports []goswitch.PortInfo) {
 
 func renderStats(w io.Writer, stats []goswitch.PortStats) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PORT\tRX_FRAMES\tRX_BYTES\tTX_FRAMES\tTX_BYTES\tFLOODED\tDROPPED")
+	fmt.Fprintln(tw, "PORT\tRX_FRAMES\tRX_BYTES\tTX_FRAMES\tTX_BYTES\tFLOODED\tFWD_DROP\tTX_DROP")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n",
-			s.Name, s.RxFrames, s.RxBytes, s.TxFrames, s.TxBytes, s.Flooded, s.Dropped)
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+			s.Name, s.RxFrames, s.RxBytes, s.TxFrames, s.TxBytes, s.Flooded, s.ForwardDrop, s.TxDrop)
 	}
 	tw.Flush()
 }
@@ -180,14 +180,14 @@ func renderRate(w io.Writer, first, second []goswitch.PortStats, elapsed float64
 		prev[s.Name] = s
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PORT\tRX_PPS\tRX_RATE\tTX_PPS\tTX_RATE\tDROP_PS")
+	fmt.Fprintln(tw, "PORT\tRX_PPS\tRX_RATE\tTX_PPS\tTX_RATE\tFWD_DROP_PS\tTX_DROP_PS")
 	for _, s := range second {
 		p := prev[s.Name] // zero value if the port is new this window
-		fmt.Fprintf(tw, "%s\t%.1f\t%s\t%.1f\t%s\t%.1f\n",
+		fmt.Fprintf(tw, "%s\t%.1f\t%s\t%.1f\t%s\t%.1f\t%.1f\n",
 			s.Name,
 			perSec(s.RxFrames, p.RxFrames, elapsed), humanRate(perSec(s.RxBytes, p.RxBytes, elapsed)),
 			perSec(s.TxFrames, p.TxFrames, elapsed), humanRate(perSec(s.TxBytes, p.TxBytes, elapsed)),
-			perSec(s.Dropped, p.Dropped, elapsed))
+			perSec(s.ForwardDrop, p.ForwardDrop, elapsed), perSec(s.TxDrop, p.TxDrop, elapsed))
 	}
 	tw.Flush()
 }

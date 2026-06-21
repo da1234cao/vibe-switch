@@ -203,7 +203,7 @@ func (e *Engine) forward(p *port, frame []byte) {
 		}
 	}
 	if !hasEth || len(fp.eth.DstMAC) != 6 || len(fp.eth.SrcMAC) != 6 {
-		atomic.AddUint64(&p.stats.dropped, 1)
+		atomic.AddUint64(&p.stats.forwardDrop, 1)
 		return
 	}
 
@@ -219,7 +219,7 @@ func (e *Engine) forward(p *port, frame []byte) {
 
 	vid, ok := p.classify(hasTag, fv.tagVID)
 	if !ok {
-		atomic.AddUint64(&p.stats.dropped, 1)
+		atomic.AddUint64(&p.stats.forwardDrop, 1)
 		return
 	}
 
@@ -266,8 +266,15 @@ func (e *Engine) emit(out *port, fv *frameView, vid uint16) {
 	out.writeMu.Lock()
 	err := out.io.WritePacketData(pkt)
 	out.writeMu.Unlock()
-	if err == nil {
-		atomic.AddUint64(&out.stats.txFrames, 1)
-		atomic.AddUint64(&out.stats.txBytes, uint64(len(pkt)))
+	if err != nil {
+		// A failed egress write loses the frame. Count it instead of swallowing
+		// it: the dominant cause is an oversized frame the kernel rejects with
+		// EMSGSIZE (e.g. a GRO super-frame), which would otherwise vanish with no
+		// trace in the stats — "rx_frames != tx_frames + tx_drop" is the
+		// invariant that surfaces it.
+		atomic.AddUint64(&out.stats.txDrop, 1)
+		return
 	}
+	atomic.AddUint64(&out.stats.txFrames, 1)
+	atomic.AddUint64(&out.stats.txBytes, uint64(len(pkt)))
 }
